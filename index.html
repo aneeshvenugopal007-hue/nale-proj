@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polygraph AI - Deception Analysis System</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+    <!-- Load MediaPipe FaceMesh via CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <!-- FFT library for pulse detection -->
+    <script src="https://cdn.jsdelivr.net/npm/fft-js@0.0.12/lib/fft.js"></script>
+</head>
+<body>
+    <div class="background-animation"></div>
+    
+    <header class="cyber-header">
+        <h1>POLYGRAPH.AI <span class="badge">PRO</span></h1>
+        <div class="status-bar">
+            <span class="status-indicator hardware-status tooltip" data-tooltip="Arduino & Pulse Sensor disconnected">
+                <span class="dot red"></span> HARDWARE
+            </span>
+            <span class="status-indicator camera-status tooltip" data-tooltip="Webcam inactive">
+                <span class="dot red"></span> CAMERA
+            </span>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Dashboard Panels -->
+        <div class="panels">
+            <!-- Left Panel: Data Streams -->
+            <aside class="panel left-panel">
+                <div class="panel-header">
+                    <h2>SENSOR STREAMS</h2>
+                </div>
+                
+                <div class="stream-container">
+                    <h3>BIOMETRICS: PULSE RATE</h3>
+                    <div class="canvas-wrapper pulse-wrapper">
+                        <canvas id="pulseCanvas"></canvas>
+                        <div class="metrics-overlay">
+                            <span id="bpmValue" class="metric-value">--</span>
+                            <span class="metric-label">BPM</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stream-container">
+                    <h3>OPTICAL: EYE TRACKING</h3>
+                    <div class="canvas-wrapper video-wrapper">
+                        <video id="webcamVideo" autoplay playsinline></video>
+                        <canvas id="trackingCanvas"></canvas>
+                        <div class="crosshair center"></div>
+                        <div class="metrics-overlay bottom">
+                            <span id="saccadeRate" class="metric-value">0</span>
+                            <span class="metric-label">Saccades/sec</span>
+                            <div style="margin-left:12px; display:inline-block;">
+                                <span id="blinkRate" class="metric-value">0</span>
+                                <span class="metric-label">Blinks/sec</span>
+                            </div>
+                            <!-- additional backend-derived metrics -->
+                            <div class="additional-metrics">
+                                <span>Pupil: <span id="pupilDilation">--</span></span>
+                                <span>Gaze: <span id="gazeDirection">--</span></span>
+                                <span>Blink dur: <span id="blinkDuration">--</span>s</span>
+                                <span>Fixation: <span id="fixationTime">--</span>s</span>
+                                <span>Micro-sacc/sec: <span id="microSaccadeRate">0</span></span>
+                            </div>
+                        </div>
+                        <canvas id="blinkChart" style="display:block; margin-top:8px; width:180px; height:56px;"></canvas>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Center Panel: AI Analysis Interface -->
+            <section class="panel main-panel">
+                <div class="panel-header">
+                    <h2>INVESTIGATION CONSOLE</h2>
+                </div>
+                
+                <!-- Setup Phase -->
+                <div id="setupView" class="view-section active">
+                    <div class="input-group">
+                        <label for="subjectName">SUBJECT NAME</label>
+                        <input type="text" id="subjectName" placeholder="Enter subject name..." autocomplete="off">
+                    </div>
+                    <div class="input-group">
+                        <label for="crimeDetails">INCIDENT DETAILS (For AI Context)</label>
+                        <textarea id="crimeDetails" rows="4" placeholder="Describe the main incident or crime..."></textarea>
+                    </div>
+                    
+                    <div class="action-row">
+                        <button id="btnConnectHardware" class="cyber-button secondary">
+                            [+] CONNECT COM PORT
+                        </button>
+                        <button id="btnStartCalibration" class="cyber-button primary" disabled>
+                            START INTERROGATION <span class="arrow">>></span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Calibration Phase (HIDDEN) -->
+                <div id="calibrationView" class="view-section hidden" style="display:none;">
+                    <div class="ai-prompt-box">
+                        <p class="system-text">AI SYSTEM CALIBRATING BASELINE PARAMETERS...</p>
+                        <p id="calibrationQuestion" class="ai-question">establishing baseline...</p>
+                    </div>
+                    
+                    <div class="progress-container">
+                        <div class="progress-bar">
+                            <div id="calibrationProgress" class="progress-fill"></div>
+                        </div>
+                        <span id="calibrationProgressText">0%</span>
+                    </div>
+
+                    <div class="action-row centered">
+                        <button id="btnNextCalibration" class="cyber-button primary">
+                            NEXT BASE QUESTION
+                        </button>
+                        <button id="btnBeginAnalysis" class="cyber-button danger hidden">
+                            START REAL-TIME ANALYSIS
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Analysis Phase -->
+                <div id="analysisView" class="view-section hidden">
+                    <div class="ai-prompt-box active-scan">
+                        <p class="system-text">ACTIVE INTERROGATION</p>
+                        <p id="analysisQuestion" class="ai-question">Loading AI generated question...</p>
+                        <textarea id="answerInput" rows="2" placeholder="Type subject's response here..."></textarea>
+                        <div class="voice-response-panel">
+                            <div class="record-controls">
+                                <button id="btnToggleRecording" class="cyber-button secondary">Record Answer</button>
+                                <span id="recordingStatus" class="recording-status">Microphone ready</span>
+                            </div>
+                            <audio id="recordedAudio" controls class="audio-player hidden"></audio>
+                            <p id="recordingHint" class="hint-text">Speak your answer, then press NEXT QUESTION to save it.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="real-time-stats">
+                        <div class="stat-box">
+                            <h4>STRESS LEVEL</h4>
+                            <div class="stress-meter">
+                                <div id="stressFill" class="meter-fill"></div>
+                            </div>
+                        </div>
+                        <div class="stat-box">
+                            <h4>EYE SHIFTS</h4>
+                            <span id="eyeShiftScore" class="digital-text">NORMAL</span>
+                        </div>
+                    </div>
+
+                    <div class="action-row centered">
+                        <button id="btnNextAnalysis" class="cyber-button primary">
+                            NEXT QUESTION
+                        </button>
+                        <button id="btnEndAnalysis" class="cyber-button danger">
+                            [ END ANALYSIS ]
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Results Phase -->
+                <div id="resultsView" class="view-section hidden">
+                    <div class="results-container">
+                        <h2 class="results-title">DECEPTION PROBABILITY</h2>
+                        <div class="probability-circle">
+                            <svg viewBox="0 0 36 36" class="circular-chart">
+                                <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                                <path id="probCircle" class="circle" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            </svg>
+                            <div class="probability-text">
+                                <span id="finalProbability">--</span>%
+                            </div>
+                        </div>
+                        
+                        <div class="analysis-reasons">
+                            <h3>ANALYSIS RATIONALE</h3>
+                            <ul id="rationaleList">
+                                <!-- Populated by JS -->
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <div class="action-row centered">
+                        <button id="btnReset" class="cyber-button secondary">
+                            NEW SESSION
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- Scripts -->
+    <script src="serial.js"></script>
+    <script src="tracking.js"></script>
+    <script src="gemini-api.js"></script>
+    <script src="logic.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
